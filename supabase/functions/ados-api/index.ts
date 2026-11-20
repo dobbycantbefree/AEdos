@@ -24,7 +24,7 @@ function response(status: number, data: unknown, requestOrigin: string | null) {
       "x-content-type-options": "nosniff",
       "access-control-allow-origin": allowedOrigin(requestOrigin),
       "access-control-allow-headers": "authorization, content-type",
-      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
       "vary": "Origin",
     },
   });
@@ -121,6 +121,18 @@ Deno.serve(async req => {
       const inserted = await db.from("ados_alpha_files").insert({ id, project, name, mime, storage_path: path, content, uploaded_by: user }).select("created_at").single();
       if (inserted.error) { await db.storage.from(bucket).remove([path]); throw inserted.error; }
       return response(201, { file: { id, name, mime, content: content.slice(0, 30000), tag: "Others", by: user, date: inserted.data.created_at, enabled: true, remote: true } }, requestOrigin);
+    }
+    if (route.startsWith("/file/") && req.method === "DELETE") {
+      const id = route.slice("/file/".length);
+      if (!/^[0-9a-f-]{36}$/.test(id)) return response(404, { error: "Not found" }, requestOrigin);
+      const { data } = await db.from("ados_alpha_files").select("storage_path,uploaded_by").eq("id", id).eq("project", project).single();
+      if (!data) return response(404, { error: "Not found" }, requestOrigin);
+      if (data.uploaded_by !== user) return response(403, { error: "Only the uploader can delete this file" }, requestOrigin);
+      const removed = await db.storage.from(bucket).remove([data.storage_path]);
+      if (removed.error) throw removed.error;
+      const deleted = await db.from("ados_alpha_files").delete().eq("id", id).eq("uploaded_by", user);
+      if (deleted.error) throw deleted.error;
+      return response(200, { deleted: true }, requestOrigin);
     }
     if (route.startsWith("/file/") && req.method === "GET") {
       const id = route.slice("/file/".length);
