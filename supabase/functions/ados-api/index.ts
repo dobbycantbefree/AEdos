@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const origin = "https://dobbycantbefree.github.io";
+const origins = ["https://dobbycantbefree.github.io", "https://aedos-xi.vercel.app"];
+const allowedOrigin = (requestOrigin: string | null) => requestOrigin && origins.includes(requestOrigin) ? requestOrigin : "null";
 const project = "ces27";
 const bucket = "ados-alpha";
 const maxBytes = 1024 * 1024;
@@ -21,7 +22,7 @@ function response(status: number, data: unknown, requestOrigin: string | null) {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      "access-control-allow-origin": requestOrigin === origin ? origin : "null",
+      "access-control-allow-origin": allowedOrigin(requestOrigin),
       "access-control-allow-headers": "authorization, content-type",
       "access-control-allow-methods": "GET, POST, OPTIONS",
       "vary": "Origin",
@@ -82,7 +83,7 @@ function passages(files: Array<{ name: string; content: string }>, question: str
 Deno.serve(async req => {
   const requestOrigin = req.headers.get("origin");
   if (req.method === "OPTIONS") return response(200, {}, requestOrigin);
-  if (requestOrigin && requestOrigin !== origin) return response(403, { error: "Origin not allowed" }, requestOrigin);
+  if (requestOrigin && !origins.includes(requestOrigin)) return response(403, { error: "Origin not allowed" }, requestOrigin);
   const pathname = new URL(req.url).pathname;
   const route = pathname.slice(pathname.indexOf("/ados-api") + "/ados-api".length);
   try {
@@ -130,7 +131,7 @@ Deno.serve(async req => {
       return new Response(downloaded.data, { headers: {
         "content-type": data.mime,
         "content-disposition": "attachment; filename*=UTF-8''" + encodeURIComponent(data.name),
-        "access-control-allow-origin": requestOrigin === origin ? origin : "null",
+        "access-control-allow-origin": allowedOrigin(requestOrigin),
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
       } });
