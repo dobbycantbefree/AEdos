@@ -54,7 +54,7 @@ const save=()=>write('db',db);let user=null,windows={},z=10,pid='ces27',feature=
 }
 function closeAlphaGuide(){document.querySelector('#alpha-entry')?.remove();sessionStorage.setItem('ados-alpha-guide-seen','1')}
 let alphaSharedServer=false;
-const alphaCloudBase=location.hostname==='dobbycantbefree.github.io'?'https://zawgvpposiuylrsfswlm.supabase.co/functions/v1/ados-api':'';
+const alphaCloudBase=['dobbycantbefree.github.io','aedos-xi.vercel.app'].includes(location.hostname)?'https://zawgvpposiuylrsfswlm.supabase.co/functions/v1/ados-api':'';
 let alphaToken='';
 function alphaFetch(route,options={}){return fetch((alphaCloudBase||'/api')+route,{...options,headers:{...options.headers,...(alphaCloudBase&&alphaToken?{Authorization:'Bearer '+alphaToken}:{})},...(alphaCloudBase?{}:{credentials:'same-origin'})})}
 async function syncAlphaSharedFiles(){if(!alphaSharedServer)return;try{let r=await alphaFetch('/files');if(!r.ok)return;let d=await r.json(),p=db.projects.find(x=>x.id==='ces27');p.files=alphaCloudBase?d.files:p.files.filter(x=>!x.remote).concat(d.files);save()}catch(e){toast('공유 파일 동기화 실패')}}
