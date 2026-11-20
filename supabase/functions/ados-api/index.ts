@@ -113,7 +113,8 @@ Deno.serve(async req => {
       if (!content.trim()) return response(400, { error: "Empty file" }, requestOrigin);
       const name = b.name.split(/[\\/]/).pop()!.slice(0, 120);
       const id = crypto.randomUUID();
-      const path = project + "/" + id + "/" + name;
+      const extension = name.toLowerCase().match(/\.(txt|md|csv)$/)?.[1] || "txt";
+      const path = project + "/" + id + "/" + id + "." + extension;
       const mime = name.toLowerCase().endsWith(".csv") ? "text/csv" : name.toLowerCase().endsWith(".md") ? "text/markdown" : "text/plain";
       const uploaded = await db.storage.from(bucket).upload(path, bytes, { contentType: mime, upsert: false });
       if (uploaded.error) throw uploaded.error;
