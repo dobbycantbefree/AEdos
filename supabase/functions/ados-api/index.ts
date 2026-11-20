@@ -169,18 +169,20 @@ Deno.serve(async req => {
             { role: "system", content: "Answer the user's question in Korean using only the supplied document excerpts. If the excerpts are insufficient, say so. Never invent facts. Keep the answer concise and cite source file names." },
             { role: "user", content: "Document excerpts:\n" + hits.map((h, i) => `[${i + 1}] ${h.name}: ${h.text}`).join("\n") + "\n\nQuestion: " + question },
           ],
-          max_tokens: 450,
+          max_completion_tokens: 600,
+          chat_template_kwargs: { enable_thinking: false },
           temperature: 0.2,
         }),
       });
       if (!cf.ok) return response(cf.status === 429 ? 429 : 502, { error: cf.status === 429 ? "무료 AI 사용량이 소진되었거나 잠시 혼잡합니다." : "AI 응답을 받지 못했습니다." }, requestOrigin);
       const payload = await cf.json();
-      const answer = payload?.result?.response || payload?.response ||
+      const rawAnswer = payload?.result?.response || payload?.response ||
         payload?.result?.choices?.[0]?.message?.content ||
         payload?.choices?.[0]?.message?.content;
-      if (typeof answer !== "string" || !answer.trim()) return response(502, { error: "AI returned no answer" }, requestOrigin);
+      const answer = typeof rawAnswer === "string" ? rawAnswer : Array.isArray(rawAnswer) ? rawAnswer.map(part => typeof part === "string" ? part : part?.text || "").join("\n") : "";
+      const finalAnswer = answer.trim() || "AI가 이번에는 문장을 만들지 못했습니다. 관련 자료 원문:\n" + hits.slice(0, 2).map(h => `- ${h.name}: ${h.text}`).join("\n");
       await db.from("ados_alpha_questions").upsert({ tester_id: user, day: today, count: (usage?.count || 0) + 1 });
-      return response(200, { mode: "cloudflare_ai", answer, sources: [...new Set(hits.map(h => h.name))].map(file => ({ project: "CES 2027", file })) }, requestOrigin);
+      return response(200, { mode: answer.trim() ? "cloudflare_ai" : "source_excerpt", answer: finalAnswer, sources: [...new Set(hits.map(h => h.name))].map(file => ({ project: "CES 2027", file })) }, requestOrigin);
     }
     return response(404, { error: "Not found" }, requestOrigin);
   } catch (e) {
