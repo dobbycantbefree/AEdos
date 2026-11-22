@@ -3,7 +3,7 @@
 공개 화면: https://aedos-xi.vercel.app/
 보조 화면: https://dobbycantbefree.github.io/AEdos/
 
-테스터 4명은 각자 기기에서 `tester1`부터 `tester4`까지 고유 계정으로 로그인합니다. **Projects → CES 2027 → Files**에서 TXT·MD·CSV 파일을 올리거나 **Add Note**로 메모를 작성하고 **Question**에서 관련 원문 문장을 검색할 수 있습니다. 파일은 서버를 통해 공유됩니다. 테스트용 Cloudflare Workers AI 연결은 현재 꺼져 있으며, Research, Creative, Global AI 등 다른 화면은 시연 모드입니다.
+테스터 4명은 각자 기기에서 `tester1`부터 `tester4`까지 고유 계정으로 로그인합니다. **Projects → OYF2027 → Files**에서 TXT·MD·CSV 파일을 올리거나 **Add Note**로 메모를 작성하고 **Question**에서 자료에 질문할 수 있습니다. 일정·장소·예산처럼 원문에서 바로 찾을 수 있는 질문은 브라우저 문서 검색으로 처리하고, 아이디어·분석·제안처럼 해석이 필요한 질문만 Cloudflare Workers AI를 사용합니다. 파일은 인증된 서버를 통해 공유되며 Research, Creative, Global AI 등 다른 화면은 시연 모드입니다.
 
 ## 파일과 사용 한도
 

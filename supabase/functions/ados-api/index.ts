@@ -182,7 +182,7 @@ Deno.serve(async req => {
       const answer = typeof rawAnswer === "string" ? rawAnswer : Array.isArray(rawAnswer) ? rawAnswer.map(part => typeof part === "string" ? part : part?.text || "").join("\n") : "";
       const finalAnswer = answer.trim() || "AI가 이번에는 문장을 만들지 못했습니다. 관련 자료 원문:\n" + hits.slice(0, 2).map(h => `- ${h.name}: ${h.text}`).join("\n");
       await db.from("ados_alpha_questions").upsert({ tester_id: user, day: today, count: (usage?.count || 0) + 1 });
-      return response(200, { mode: answer.trim() ? "cloudflare_ai" : "source_excerpt", answer: finalAnswer, sources: [...new Set(hits.map(h => h.name))].map(file => ({ project: "CES 2027", file })) }, requestOrigin);
+      return response(200, { mode: answer.trim() ? "cloudflare_ai" : "source_excerpt", answer: finalAnswer, sources: [...new Set(hits.map(h => h.name))].map(file => ({ project: "OYF2027", file })) }, requestOrigin);
     }
     return response(404, { error: "Not found" }, requestOrigin);
   } catch (e) {
