@@ -62,22 +62,48 @@ async function session(req: Request) {
   } catch { return null; }
 }
 function terms(s: string) {
-  return [...new Set(s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(x => x.length > 1))];
+  const stop = new Set(["자료", "문서", "내용", "기반", "바탕", "관련", "질문", "분석", "분석해", "알려줘", "알려주세요", "주세요", "대한", "대해서"]);
+  return [...new Set(s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(x => x.length > 1 && !stop.has(x)))];
 }
 function passages(files: Array<{ name: string; content: string }>, question: string) {
   const query = terms(question);
-  const hits: Array<{ name: string; text: string; score: number }> = [];
-  for (const file of files) {
+  const broad = /전체|모든|종합|통합|전반|크리에이티브|컨셉|콘셉트|전략|아이디어/i.test(question);
+  const sourceFiles = files.filter(file => /(OYF27|올리브영|페스타|밀락더마켓)/i.test(file.name));
+  const candidates = sourceFiles.length ? sourceFiles : files;
+  const byFile = new Map<string, Array<{ name: string; text: string; score: number }>>();
+  for (const file of candidates) {
+    const fileTerms = terms(file.name);
+    const fileScore = query.filter(term => fileTerms.some(nameTerm => nameTerm.includes(term) || term.includes(nameTerm))).length;
+    const fileHits: Array<{ name: string; text: string; score: number }> = [];
     for (const raw of file.content.split(/(?<=[.!?。])\s+|\n+/)) {
       const text = raw.trim();
       if (text.length < 7) continue;
-      const haystack = (file.name + " " + text).toLowerCase();
-      const score = query.filter(t => haystack.includes(t)).length;
-      if (score) hits.push({ name: file.name, text: text.slice(0, 600), score });
+      const body = text.toLowerCase();
+      const bodyScore = query.filter(term => body.includes(term)).length;
+      const score = bodyScore * 3 + fileScore;
+      if (score) fileHits.push({ name: file.name, text: text.slice(0, 600), score });
     }
+    fileHits.sort((a, b) => b.score - a.score || b.text.length - a.text.length);
+    if (broad && !fileHits.length) {
+      const fallback = file.content.split(/(?<=[.!?。])\s+|\n+/).map(text => text.trim()).find(text => text.length >= 20 && !/^\s*(page|페이지)\s*\d+/i.test(text));
+      if (fallback) fileHits.push({ name: file.name, text: fallback.slice(0, 600), score: 0 });
+    }
+    if (fileHits.length) byFile.set(file.name, fileHits);
   }
-  hits.sort((a, b) => b.score - a.score);
-  return hits.slice(0, 5);
+  const rankedFiles = [...byFile.entries()].sort((a, b) => (b[1][0]?.score || 0) - (a[1][0]?.score || 0));
+  const selected = rankedFiles.slice(0, 9).map(([, hits]) => hits[0]);
+  for (let depth = 1; selected.length < 10; depth++) {
+    let added = false;
+    for (const [, hits] of rankedFiles) {
+      if (hits[depth]) {
+        selected.push(hits[depth]);
+        added = true;
+        if (selected.length >= 10) break;
+      }
+    }
+    if (!added) break;
+  }
+  return selected;
 }
 
 Deno.serve(async req => {
@@ -166,7 +192,7 @@ Deno.serve(async req => {
         headers: { authorization: "Bearer " + aiToken, "content-type": "application/json" },
         body: JSON.stringify({
           messages: [
-            { role: "system", content: "Answer the user's question in Korean using only the supplied document excerpts. If the excerpts are insufficient, say so. Never invent facts. Keep the answer concise and cite source file names." },
+            { role: "system", content: "Answer in Korean using only the supplied document excerpts. Synthesize evidence across multiple files when available, cite the file names actually used, and explicitly note any conflicts between sources. If the excerpts are insufficient, say so. Never invent facts. Keep the answer concise." },
             { role: "user", content: "Document excerpts:\n" + hits.map((h, i) => `[${i + 1}] ${h.name}: ${h.text}`).join("\n") + "\n\nQuestion: " + question },
           ],
           max_completion_tokens: 600,
@@ -182,7 +208,8 @@ Deno.serve(async req => {
       const answer = typeof rawAnswer === "string" ? rawAnswer : Array.isArray(rawAnswer) ? rawAnswer.map(part => typeof part === "string" ? part : part?.text || "").join("\n") : "";
       const finalAnswer = answer.trim() || "AI가 이번에는 문장을 만들지 못했습니다. 관련 자료 원문:\n" + hits.slice(0, 2).map(h => `- ${h.name}: ${h.text}`).join("\n");
       await db.from("ados_alpha_questions").upsert({ tester_id: user, day: today, count: (usage?.count || 0) + 1 });
-      return response(200, { mode: answer.trim() ? "cloudflare_ai" : "source_excerpt", answer: finalAnswer, sources: [...new Set(hits.map(h => h.name))].map(file => ({ project: "OYF2027", file })) }, requestOrigin);
+      const sourceNames = [...new Set(hits.map(h => h.name))];
+      return response(200, { mode: answer.trim() ? "cloudflare_ai" : "source_excerpt", answer: finalAnswer, sources: sourceNames.map(file => ({ project: "OYF2027", file })), retrieval: { files: sourceNames.length, passages: hits.length } }, requestOrigin);
     }
     return response(404, { error: "Not found" }, requestOrigin);
   } catch (e) {
