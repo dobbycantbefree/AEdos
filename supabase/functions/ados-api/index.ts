@@ -105,6 +105,30 @@ function passages(files: Array<{ name: string; content: string }>, question: str
   }
   return selected;
 }
+function distributedExcerpts(content: string, limit = 14) {
+  const parts = content.split(/(?<=[.!?。])\s+|\n+/).map(text => text.trim()).filter(text => text.length >= 12);
+  if (parts.length <= limit) return parts.map(text => text.slice(0, 800));
+  const selected: string[] = [];
+  const used = new Set<number>();
+  for (let i = 0; i < limit; i++) {
+    const index = Math.min(parts.length - 1, Math.round(i * (parts.length - 1) / (limit - 1)));
+    if (!used.has(index)) {
+      selected.push(parts[index].slice(0, 800));
+      used.add(index);
+    }
+  }
+  return selected;
+}
+function frequentTerms(content: string, limit = 24) {
+  const counts = new Map<string, number>();
+  const stop = new Set(["자료", "문서", "내용", "기반", "바탕", "관련", "대한", "대해서", "그리고", "합니다", "있습니다"]);
+  for (const term of content.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/)) {
+    if (term.length < 2 || /^\d+$/.test(term)) continue;
+    if (stop.has(term)) continue;
+    counts.set(term, (counts.get(term) || 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([term]) => term);
+}
 
 Deno.serve(async req => {
   const requestOrigin = req.headers.get("origin");
@@ -210,6 +234,48 @@ Deno.serve(async req => {
       await db.from("ados_alpha_questions").upsert({ tester_id: user, day: today, count: (usage?.count || 0) + 1 });
       const sourceNames = [...new Set(hits.map(h => h.name))];
       return response(200, { mode: answer.trim() ? "cloudflare_ai" : "source_excerpt", answer: finalAnswer, sources: sourceNames.map(file => ({ project: "OYF2027", file })), retrieval: { files: sourceNames.length, passages: hits.length } }, requestOrigin);
+    }
+    if (route === "/review" && req.method === "POST") {
+      const { project: requested, target_id: targetId, focus = "" } = await req.json();
+      if (requested !== project || typeof targetId !== "string" || !/^[0-9a-f-]{36}$/.test(targetId) || typeof focus !== "string" || focus.length > 500) {
+        return response(400, { error: "검토 대상 파일과 요청 내용을 확인해 주세요." }, requestOrigin);
+      }
+      const aiToken = Deno.env.get("CLOUDFLARE_API_TOKEN");
+      if (!aiToken) return response(503, { error: "AI connection not configured" }, requestOrigin);
+      const { data: files, error } = await db.from("ados_alpha_files").select("id,name,content").eq("project", project).order("created_at", { ascending: false }).limit(100);
+      if (error) throw error;
+      const target = files?.find(file => file.id === targetId);
+      if (!target) return response(404, { error: "검토 대상 파일을 찾지 못했습니다." }, requestOrigin);
+      const proposal = distributedExcerpts(target.content);
+      if (!proposal.length) return response(400, { error: "검토할 수 있는 제안서 본문이 없습니다." }, requestOrigin);
+      const referenceFiles = (files || []).filter(file => file.id !== targetId && /(OYF27|올리브영|페스타|밀락더마켓)/i.test(file.name));
+      const reviewQuery = `전체 종합 브리프 요구사항 필수 금지 일정 예산 타깃 공간 운영 ${focus} ${frequentTerms(target.content).join(" ")}`;
+      const references = passages(referenceFiles, reviewQuery);
+      if (!references.length) return response(200, { answer: "비교할 기준 문서를 찾지 못했습니다. RFP, OT 자료, 질의답변 또는 크리에이티브 요청사항을 먼저 올려 주세요.", sources: [{ project: "OYF2027", file: target.name }], mode: "no_reference" }, requestOrigin);
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: usage } = await db.from("ados_alpha_questions").select("count").eq("tester_id", user).eq("day", today).maybeSingle();
+      if ((usage?.count || 0) >= 5) return response(429, { error: "오늘의 알파테스트 AI 사용 5회가 끝났습니다." }, requestOrigin);
+      const cf = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`, {
+        method: "POST",
+        headers: { authorization: "Bearer " + aiToken, "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: "You are a meticulous Korean proposal reviewer. Treat TARGET PROPOSAL as the document being reviewed and REFERENCE DOCUMENTS as the authoritative brief. Never confuse their roles. Find only evidence-supported conflicts, omissions, ambiguities, or confirmation needs. Do not invent requirements. Write in Korean with these sections: 1) 한줄 총평, 2) 충돌 사항, 3) 누락 가능성, 4) 확인 필요, 5) 수정 권고. For every issue, cite both the relevant proposal excerpt and reference file name; say '근거 부족' when evidence is insufficient." },
+            { role: "user", content: `TARGET PROPOSAL — ${target.name}\n${proposal.map((text, i) => `[P${i + 1}] ${text}`).join("\n")}\n\nREFERENCE DOCUMENTS\n${references.map((item, i) => `[R${i + 1}] ${item.name}: ${item.text}`).join("\n")}\n\nREVIEW FOCUS\n${focus.trim() || "브리프와 충돌하거나 빠진 부분을 전체적으로 검토해 주세요."}` },
+          ],
+          max_completion_tokens: 1200,
+          chat_template_kwargs: { enable_thinking: false },
+          temperature: 0.1,
+        }),
+      });
+      if (!cf.ok) return response(cf.status === 429 ? 429 : 502, { error: cf.status === 429 ? "무료 AI 사용량이 소진되었거나 잠시 혼잡합니다." : "AI 검토 응답을 받지 못했습니다." }, requestOrigin);
+      const payload = await cf.json();
+      const rawAnswer = payload?.result?.response || payload?.response || payload?.result?.choices?.[0]?.message?.content || payload?.choices?.[0]?.message?.content;
+      const answer = typeof rawAnswer === "string" ? rawAnswer : Array.isArray(rawAnswer) ? rawAnswer.map(part => typeof part === "string" ? part : part?.text || "").join("\n") : "";
+      if (!answer.trim()) return response(502, { error: "AI가 검토 결과를 만들지 못했습니다." }, requestOrigin);
+      await db.from("ados_alpha_questions").upsert({ tester_id: user, day: today, count: (usage?.count || 0) + 1 });
+      const sourceNames = [target.name, ...new Set(references.map(item => item.name))];
+      return response(200, { mode: "proposal_review", answer: answer.trim(), target: target.name, sources: sourceNames.map(file => ({ project: "OYF2027", file })), retrieval: { files: sourceNames.length, proposal_excerpts: proposal.length, reference_passages: references.length } }, requestOrigin);
     }
     return response(404, { error: "Not found" }, requestOrigin);
   } catch (e) {
