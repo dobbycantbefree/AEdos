@@ -91,17 +91,17 @@ function chatKey(n){return user.id+'|'+(n==='Global AI'?'global':pid+'|'+feature
 function localDocumentAnswer(question){
  const q=question.trim(),complex=/(아이디어|제안해|추천해|기획해|만들어|써줘|작성해|카피|네이밍|브레인스토밍|분석해|비교해|전략을|발전시켜|평가해)/i.test(q);
  if(complex)return null;
- const stop=new Set(['알려줘','알려주세요','무엇인가요','무엇인지','어떤가요','프로젝트','관련','내용','자료','질문','정리','사항','대해서','대해','있나요','인가요','입니까']);
+ const stop=new Set(['알려줘','알려주세요','무엇인가요','무엇인지','어떤가요','프로젝트','관련','내용','자료','질문','정리','사항','대해서','대해','있나요','인가요','입니까','행사','어디','언제','얼마','주요']);
  const terms=[...new Set(q.toLowerCase().replace(/[^\p{L}\p{N} ]/gu,' ').split(/\s+/).map(x=>x.replace(/(은|는|이|가|을|를|의|에|에서|으로|로|과|와|도|만|부터|까지|인가요|주세요|알려줘)$/,'')).filter(x=>x.length>1&&!stop.has(x)))];
  if(!terms.length)return null;
  const hits=[];
  for(const file of (P()?.files||[]).filter(x=>x.enabled&&!x.deleted&&isOyfSource(x)))for(const raw of String(file.content||'').split(/(?<=[.!?。])\s+|\n+/)){
   const text=raw.trim();if(text.length<8)continue;const hay=(file.name+' '+text).toLowerCase(),matched=terms.filter(term=>hay.includes(term));
-  if(matched.length)hits.push({file,text:text.slice(0,420),score:matched.length+(hay.includes(terms.join(' '))?1:0)});
+  if(matched.length){const authority=/RFP|질의답변/i.test(file.name)?3:/구매팀.*입찰/i.test(file.name)?2:/OT 상세/i.test(file.name)?1:0;hits.push({file,text:text.slice(0,420),matched,authority,score:matched.length*10+authority+(hay.includes(terms.join(' '))?2:0)})}
  }
  hits.sort((a,b)=>b.score-a.score||a.text.length-b.text.length);const best=hits[0],needed=terms.length>=4?2:1;
- if(!best||best.score<needed)return null;
- const selected=[];for(const hit of hits){if(selected.some(x=>x.file.id===hit.file.id&&x.text===hit.text))continue;selected.push(hit);if(selected.length===3)break}
+ if(!best||best.matched.length<needed)return null;
+ const selected=[];for(const term of terms){const candidates=hits.filter(x=>x.matched.includes(term)&&!selected.some(y=>y.text===x.text)).sort((a,b)=>b.authority-a.authority+((b.text.toLowerCase().startsWith(term)?1:0)-(a.text.toLowerCase().startsWith(term)?1:0))*2||b.score-a.score);if(candidates[0])selected.push(candidates[0]);if(selected.length===3)break}
  return {answer:'[문서 검색 답변 · AI 사용 안 함]\n\n'+selected.map((x,i)=>`${i+1}. ${x.text}`).join('\n\n')+'\n\n더 해석하거나 아이디어로 발전시키려면 질문에 “제안해 줘” 또는 “분석해 줘”라고 적어 주세요.',sources:[...new Map(selected.map(x=>[x.file.name,{project:'OYF2027',file:x.file.name}])).values()]};
 }
 async function sendChat(n,t,a){
